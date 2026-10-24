@@ -24,10 +24,18 @@
   DevicePathLib|MdePkg/Library/UefiDevicePathLib/UefiDevicePathLib.inf
   DebugPrintErrorLevelLib|MdePkg/Library/BaseDebugPrintErrorLevelLib/BaseDebugPrintErrorLevelLib.inf
   DebugLib|MdePkg/Library/UefiDebugLibStdErr/UefiDebugLibStdErr.inf
+  # Standalone validation runs on QEMU virt. Firmware integrations supply
+  # their own SerialPortLib; Dali binds this class to its ramoops writer.
+  SerialPortLib|ArmPlatformPkg/Library/PL011SerialPortLib/PL011SerialPortLib.inf
+  PL011UartLib|ArmPlatformPkg/Library/PL011UartLib/PL011UartLib.inf
+  PL011UartClockLib|ArmPlatformPkg/Library/PL011UartClockLib/PL011UartClockLib.inf
+  IoLib|MdePkg/Library/BaseIoLibIntrinsic/BaseIoLibIntrinsic.inf
 
 [PcdsFixedAtBuild]
   gEfiMdePkgTokenSpaceGuid.PcdDebugPropertyMask|0x07
   gEfiMdePkgTokenSpaceGuid.PcdDebugPrintErrorLevel|0x80000000
+  gEfiMdeModulePkgTokenSpaceGuid.PcdSerialRegisterBase|0x09000000
+  gArmPlatformTokenSpaceGuid.PL011UartClkInHz|24000000
 
 [Components]
   DarwinBootPkg/Driver/DarwinBoot.inf

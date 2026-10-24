@@ -25,6 +25,7 @@
   DebugLib
   MemoryAllocationLib
   PrintLib
+  SerialPortLib
   UefiBootServicesTableLib
   UefiDriverEntryPoint
   UefiLib

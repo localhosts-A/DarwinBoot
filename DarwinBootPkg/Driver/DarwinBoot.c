@@ -7,6 +7,7 @@
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/PrintLib.h>
+#include <Library/SerialPortLib.h>
 #include <Library/UefiLib.h>
 #include <Protocol/UniXNULoader.h>
 #include <Protocol/LoadedImage.h>
@@ -710,11 +711,15 @@ Boot (
     }
     DEBUG ((DEBUG_WARN, "DARWINBOOT: calling ExitBootServices attempt=%lu\n", (UINT64)Attempt));
     Status = gBS->ExitBootServices (mImage, Key);
-    // The serial DEBUG backend requires no Boot Services. Do not use Print:
-    // successful EBS clears the system console and Boot Services pointers.
-    DEBUG ((DEBUG_WARN, "DARWINBOOT: ExitBootServices returned status=%r\n", Status));
+    // Successful EBS clears the system consoles. Use the platform's direct
+    // backend (Dali ramoops / standalone QEMU PL011), with no Boot Services.
+    CHAR8 ExitMessage[112];
+    AsciiSPrint (ExitMessage, sizeof ExitMessage,
+      "DARWINBOOT: ExitBootServices returned status=%r\n", Status);
+    SerialPortWrite ((UINT8 *)ExitMessage, AsciiStrLen (ExitMessage));
     if (!EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_WARN, "DARWINBOOT: entering loader trampoline\n"));
+      CONST CHAR8 *EntryMessage = "DARWINBOOT: entering loader trampoline\n";
+      SerialPortWrite ((UINT8 *)EntryMessage, AsciiStrLen (EntryMessage));
       DarwinEnter (ArgsAddress, Address + Kernel.Entry - Kernel.Base, Address, WindowSize, Video[0], Video[2] * Video[4]);
       CpuDeadLoop ();
     }
