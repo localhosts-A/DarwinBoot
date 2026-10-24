@@ -5,10 +5,26 @@ ASM_FUNC(DarwinCurrentEl)
   mrs x0, CurrentEL
   ret
 
+// The platform serial backend uses no Boot Services. Preserve the complete
+// handoff argument set across diagnostic calls, including after MMU disable.
+.macro trace_step step
+  stp x0, x1, [sp, #-64]!
+  stp x2, x3, [sp, #16]
+  stp x4, x5, [sp, #32]
+  stp x6, x30, [sp, #48]
+  mov x0, #\step
+  bl DarwinTraceStep
+  ldp x6, x30, [sp, #48]
+  ldp x4, x5, [sp, #32]
+  ldp x2, x3, [sp, #16]
+  ldp x0, x1, [sp], #64
+.endm
+
 // x0=boot_args PA, x1=entry PA, x2=owned PA, x3=owned size, x4=frame buffer
 // PA (0 for none), x5=its size in bytes. EL1 only.
 ASM_FUNC(DarwinEnter)
   msr daifset, #15
+  trace_step 0
   // Breadcrumb: a green bar (BGRA 0xFF00FF00) over the top 1/16 of the frame
   // buffer shows that this code ran, whatever the kernel does afterwards.
   cbz x4, 2f
@@ -23,6 +39,7 @@ ASM_FUNC(DarwinEnter)
   b.hi 3b
   dsb sy
 2:
+  trace_step 1
   add x5, x2, x3
   mrs x6, ctr_el0
   ubfx x6, x6, #16, #4
@@ -40,6 +57,7 @@ ASM_FUNC(DarwinEnter)
   ic iallu
   dsb sy
   isb
+  trace_step 2
   mrs x4, sctlr_el1
   bic x4, x4, #1
   bic x4, x4, #4
@@ -49,4 +67,5 @@ ASM_FUNC(DarwinEnter)
   tlbi vmalle1
   dsb sy
   isb
+  trace_step 3
   br x1

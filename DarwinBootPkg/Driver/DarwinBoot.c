@@ -42,6 +42,18 @@ STATIC EFI_HANDLE  mImage;
 UINT64 EFIAPI DarwinCurrentEl (VOID);
 VOID EFIAPI DarwinEnter (UINT64 Args, UINT64 Entry, UINT64 Memory, UINT64 Size, UINT64 VideoBase, UINT64 VideoBytes);
 
+VOID EFIAPI DarwinTraceStep (UINTN Step) {
+  CONST CHAR8 *Text;
+  switch (Step) {
+    case 0: Text = "DARWINBOOT: trampoline enter\n"; break;
+    case 1: Text = "DARWINBOOT: trampoline framebuffer complete\n"; break;
+    case 2: Text = "DARWINBOOT: trampoline cache clean complete\n"; break;
+    case 3: Text = "DARWINBOOT: trampoline MMU off; branching to kernel\n"; break;
+    default: return;
+  }
+  SerialPortWrite ((UINT8 *)Text, AsciiStrLen (Text));
+}
+
 #define READ_SYSREG(Name)  ({ UINT64 Value_; __asm__ volatile ("mrs %0, " #Name : "=r" (Value_)); Value_; })
 
 STATIC UINT32 U32 (CONST VOID *P) { return ReadUnaligned32 ((CONST UINT32 *)P); }
