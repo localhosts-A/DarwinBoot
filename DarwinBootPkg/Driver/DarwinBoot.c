@@ -437,6 +437,8 @@ AllocateWindow (KERNEL *Kernel, UINT64 WindowSize, EFI_PHYSICAL_ADDRESS *Address
   if (EFI_ERROR (Status)) {
     CHAR16 Line[96];
     UINTN  Row = 1;
+    DEBUG ((DEBUG_WARN, "DARWINBOOT: window refused size=0x%lx largest=0x%lx base=0x%lx status=%r\n",
+            WindowSize, BestBytes, BestStart, Status));
     UnicodeSPrint (Line, sizeof (Line), L"NO WINDOW %lx BIG RUN %lx @ %lx", WindowSize, BestBytes, BestStart);
     DiagDraw (Line, 0);
     for (Offset = 0; Offset + Stride <= Size; Offset += Stride) {
@@ -447,6 +449,9 @@ AllocateWindow (KERNEL *Kernel, UINT64 WindowSize, EFI_PHYSICAL_ADDRESS *Address
       }
     }
 
+  }
+  if (!EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_WARN, "DARWINBOOT: window allocated base=0x%lx size=0x%lx\n", *Address, WindowSize));
   }
   FreePool (Map);
   return Status;
@@ -501,6 +506,7 @@ Boot (
   UINTN                           Attempt;
   CHAR8                           CommandLine[1024];
   UINT64                          Video[6];
+  CONST CHAR8                     *Stage;
 
   (VOID)This;
   if ((Request == NULL) || (Request->Volume == NULL) || (Request->KernelPath == NULL)) { return EFI_INVALID_PARAMETER; }
@@ -533,19 +539,25 @@ Boot (
   Map = NULL;
   Address = 0;
   Capacity = 0;
+  Stage = "filesystem protocol";
   Status = gBS->HandleProtocol (Request->Volume, &gEfiSimpleFileSystemProtocolGuid, (VOID **)&Fs);
-  if (EFI_ERROR (Status)) { return Status; }
+  if (EFI_ERROR (Status)) { goto Fail; }
+  Stage = "open volume";
   Status = Fs->OpenVolume (Fs, &Root);
-  if (EFI_ERROR (Status)) { return Status; }
+  if (EFI_ERROR (Status)) { goto Fail; }
+  Stage = "read kernel";
   Status = ReadFile (Root, Request->KernelPath, SIZE_128MB, &Image, &ImageSize);
   if (EFI_ERROR (Status)) { goto Fail; }
+  Stage = "parse kernel";
   Status = ParseKernel (Image, ImageSize, &Kernel);
   if (EFI_ERROR (Status)) { goto Fail; }
+  Stage = "allocate sidecar path";
   Length = StrSize (Request->KernelPath);
   TreePath = AllocatePool (Length + 11 * sizeof (CHAR16));
   if (TreePath == NULL) { Status = EFI_OUT_OF_RESOURCES; goto Fail; }
   CopyMem (TreePath, Request->KernelPath, Length);
   StrCatS (TreePath, Length / sizeof (CHAR16) + 11, L".adt");
+  Stage = "read Apple DT";
   Status = ReadFile (Root, TreePath, SIZE_16MB, &Tree, &TreeSize);
   if (EFI_ERROR (Status)) { goto Fail; }
   Offset = 0;
@@ -554,6 +566,7 @@ Boot (
   AddonOffset = MAX_UINTN;
   WindowSize = 0;
   KeepPacked = FALSE;
+  Stage = "validate Apple DT";
   if (!AdtNode (Tree, TreeSize, &Offset, 0, 3, &RamdiskOffset, &TrustCacheOffset, &AddonOffset, &WindowSize, &KeepPacked) || (Offset != TreeSize)) { Status = EFI_COMPROMISED_DATA; goto Fail; }
   if (KeepPacked && (!RamdiskPacked || (RamdiskOffset == MAX_UINTN))) { Status = EFI_COMPROMISED_DATA; goto Fail; }
   if (WindowSize == 0) { WindowSize = WINDOW_SIZE; }
@@ -567,6 +580,7 @@ Boot (
   }
   CopyMem (TreePath, Request->KernelPath, Length);
   StrCatS (TreePath, Length / sizeof (CHAR16) + 11, L".trustcache");
+  Stage = "read trust cache";
   Status = ReadFile (Root, TreePath, SIZE_16MB, &TrustCaches, &TrustCacheSize);
   if (EFI_ERROR (Status) && (Status != EFI_NOT_FOUND)) { goto Fail; }
   if (TrustCaches != NULL) {
@@ -585,6 +599,7 @@ Boot (
   //
   CopyMem (TreePath, Request->KernelPath, Length);
   StrCatS (TreePath, Length / sizeof (CHAR16) + 11, L".gpuaddon");
+  Stage = "read GPU addon";
   Status = ReadFile (Root, TreePath, SIZE_64MB, &Addon, &AddonSize);
   if (EFI_ERROR (Status) && (Status != EFI_NOT_FOUND)) { goto Fail; }
   if (Addon != NULL) {
@@ -597,10 +612,13 @@ Boot (
     Status = EFI_COMPROMISED_DATA;
     goto Fail;
   }
+  Stage = "read boot video";
   Status = ReadBootVideo (Video);
   if (EFI_ERROR (Status)) { goto Fail; }
+  Stage = "allocate kernel window";
   Status = AllocateWindow (&Kernel, WindowSize, &Address);
   if (EFI_ERROR (Status)) { goto Fail; }
+  Stage = "layout boot data";
   ArgsAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB);
   TreeAddress = ArgsAddress + EFI_PAGE_SIZE;
   RamdiskAddress = ALIGN_VALUE (TreeAddress + TreeSize, EFI_PAGE_SIZE);
@@ -653,6 +671,7 @@ Boot (
   FreePool (Tree); Tree = NULL;
   FreePool (TreePath); TreePath = NULL;
   Root->Close (Root); Root = NULL;
+  Stage = "final memory map";
   Status = GetMap (&Map, &Capacity, &MapSize, &Key, &Stride);
   if (EFI_ERROR (Status)) { goto Fail; }
   Print (L"DARWINBOOT: ARM64 va=0x%lx pa=0x%lx args=0x%lx entry=0x%lx owned=0x%lx\n",
@@ -660,6 +679,7 @@ Boot (
   Print (L"DARWINBOOT: video base=0x%lx display=%lu row=%lu width=%lu height=%lu depth=%lu\n",
          Video[0], Video[1], Video[2], Video[3], Video[4], Video[5]);
   Print (L"DARWINBOOT: inputs validated; exiting boot services\n");
+  DEBUG ((DEBUG_WARN, "DARWINBOOT: inputs validated; exiting boot services\n"));
 
   //
   // The same facts in large type over the whole screen. The firmware's log
@@ -698,6 +718,7 @@ Boot (
   CpuDeadLoop ();
   return EFI_ABORTED;
 Fail:
+  DEBUG ((DEBUG_WARN, "DARWINBOOT: boot refused stage=%a status=%r; firmware retained\n", Stage, Status));
   if (Root != NULL) { Root->Close (Root); }
   if (Image != NULL) { FreePool (Image); }
   if (Tree != NULL) { FreePool (Tree); }
