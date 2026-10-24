@@ -700,7 +700,7 @@ Boot (
   DEBUG ((DEBUG_ERROR, "ID_AA64MMFR0_EL1 0x%lx  (PARange %lu, 4 KiB granule %a)\n", READ_SYSREG (id_aa64mmfr0_el1),
           READ_SYSREG (id_aa64mmfr0_el1) & 0xF, (((READ_SYSREG (id_aa64mmfr0_el1) >> 28) & 0xF) == 0xF) ? "NOT supported" : "supported"));
   DEBUG ((DEBUG_ERROR, "ID_AA64PFR0_EL1  0x%lx\n", READ_SYSREG (id_aa64pfr0_el1)));
-  DEBUG ((DEBUG_ERROR, "\nExiting boot services. A green bar across the top\nmeans the kernel entry code ran.\n"));
+  DEBUG ((DEBUG_ERROR, "\nExiting boot services. A green bar across the top\nmarks the loader trampoline, before kernel entry.\n"));
   for (Attempt = 0; Attempt < 3; Attempt++) {
     MapSize = Capacity;
     Status = gBS->GetMemoryMap (&MapSize, Map, &Key, &Stride, &Version);
@@ -708,8 +708,13 @@ Boot (
       if (Attempt == 0) { goto Fail; }
       CpuDeadLoop ();
     }
+    DEBUG ((DEBUG_WARN, "DARWINBOOT: calling ExitBootServices attempt=%lu\n", (UINT64)Attempt));
     Status = gBS->ExitBootServices (mImage, Key);
+    // The serial DEBUG backend requires no Boot Services. Do not use Print:
+    // successful EBS clears the system console and Boot Services pointers.
+    DEBUG ((DEBUG_WARN, "DARWINBOOT: ExitBootServices returned status=%r\n", Status));
     if (!EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_WARN, "DARWINBOOT: entering loader trampoline\n"));
       DarwinEnter (ArgsAddress, Address + Kernel.Entry - Kernel.Base, Address, WindowSize, Video[0], Video[2] * Video[4]);
       CpuDeadLoop ();
     }
