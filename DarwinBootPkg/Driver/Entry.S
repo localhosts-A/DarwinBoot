@@ -6,7 +6,7 @@ ASM_FUNC(DarwinCurrentEl)
   ret
 
 // The platform serial backend uses no Boot Services. Preserve the complete
-// handoff argument set across diagnostic calls, including after MMU disable.
+// handoff argument set across diagnostic calls while firmware mappings remain.
 .macro trace_step step
   stp x0, x1, [sp, #-64]!
   stp x2, x3, [sp, #16]
@@ -58,6 +58,10 @@ ASM_FUNC(DarwinEnter)
   dsb sy
   isb
   trace_step 2
+  trace_step 3
+  // No C calls or stack/data references after this point: firmware globals and
+  // dirty stack lines are not part of the cleaned kernel-owned window. Only
+  // the kernel's own entry marker can prove execution after this transition.
   mrs x4, sctlr_el1
   bic x4, x4, #1
   bic x4, x4, #4
@@ -67,5 +71,4 @@ ASM_FUNC(DarwinEnter)
   tlbi vmalle1
   dsb sy
   isb
-  trace_step 3
   br x1

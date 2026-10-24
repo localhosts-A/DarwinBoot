@@ -48,7 +48,7 @@ VOID EFIAPI DarwinTraceStep (UINTN Step) {
     case 0: Text = "DARWINBOOT: trampoline enter\n"; break;
     case 1: Text = "DARWINBOOT: trampoline framebuffer complete\n"; break;
     case 2: Text = "DARWINBOOT: trampoline cache clean complete\n"; break;
-    case 3: Text = "DARWINBOOT: trampoline MMU off; branching to kernel\n"; break;
+    case 3: Text = "DARWINBOOT: trampoline ready to disable MMU\n"; break;
     default: return;
   }
   SerialPortWrite ((UINT8 *)Text, AsciiStrLen (Text));
