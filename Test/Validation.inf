@@ -12,6 +12,7 @@
 
 [Packages]
   MdePkg/MdePkg.dec
+MdeModulePkg/MdeModulePkg.dec
   UniXNUPkg/UniXNUPkg.dec
 
 [LibraryClasses]
@@ -23,4 +24,6 @@
 
 [Protocols]
   gUniXNULoaderProtocolGuid
+  gEfiUsb2HcProtocolGuid ## PRODUCES
+  gDaliUsbNativeHostHandoffProtocolGuid ## PRODUCES
   gEfiLoadedImageProtocolGuid

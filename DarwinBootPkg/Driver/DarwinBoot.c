@@ -10,9 +10,11 @@
 #include <Library/SerialPortLib.h>
 #include <Library/UefiLib.h>
 #include <Protocol/UniXNULoader.h>
+#include <Protocol/DaliUsbNativeHostHandoff.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/GraphicsOutput.h>
 #include <Protocol/SimpleFileSystem.h>
+#include <Protocol/Usb2HostController.h>
 #include "BootArgs.h"
 #include "BootVideo.h"
 #include "PackedRamdisk.h"
@@ -333,6 +335,73 @@ GetMap (EFI_MEMORY_DESCRIPTOR **Map, UINTN *Capacity, UINTN *Size, UINTN *Key, U
     if (*Map == NULL) { return EFI_OUT_OF_RESOURCES; }
   }
   return EFI_OUT_OF_RESOURCES;
+}
+
+STATIC
+EFI_STATUS
+PrepareUsbHostHandoffs (VOID)
+{
+  EFI_STATUS                                  Status;
+  EFI_STATUS                                  ProtocolStatus;
+  EFI_STATUS                                  FreeStatus;
+  EFI_HANDLE                                  *Handles;
+  UINTN                                       Count;
+  UINTN                                       Index;
+  UINTN                                       NativeCount;
+  UINTN                                       StandardCount;
+  EFI_USB2_HC_PROTOCOL                       *Hc;
+  DALI_USB_NATIVE_HOST_HANDOFF_PROTOCOL       *Handoff;
+
+  Handles = NULL;
+  Count = 0;
+  NativeCount = 0;
+  StandardCount = 0;
+  Status = gBS->LocateHandleBuffer (ByProtocol, &gEfiUsb2HcProtocolGuid, NULL, &Count, &Handles);
+  if (Status == EFI_NOT_FOUND) { return EFI_SUCCESS; }
+  if (EFI_ERROR (Status)) { return Status; }
+  if ((Count == 0) || (Handles == NULL)) { Status = EFI_COMPROMISED_DATA; goto Done; }
+
+  for (Index = 0; Index < Count; Index++) {
+    Hc = NULL;
+    Status = gBS->HandleProtocol (Handles[Index], &gEfiUsb2HcProtocolGuid, (VOID **)&Hc);
+    if (EFI_ERROR (Status) || (Hc == NULL) || (Hc->SetState == NULL)) {
+      if (!EFI_ERROR (Status)) { Status = EFI_COMPROMISED_DATA; }
+      goto Done;
+    }
+    Handoff = NULL;
+    ProtocolStatus = gBS->HandleProtocol (Handles[Index], &gDaliUsbNativeHostHandoffProtocolGuid, (VOID **)&Handoff);
+    if (!EFI_ERROR (ProtocolStatus)) {
+      if ((Handoff == NULL) || (Handoff->Revision != DALI_USB_NATIVE_HOST_HANDOFF_PROTOCOL_REVISION) ||
+          (Handoff->PrepareHandoff == NULL)) {
+        Status = EFI_UNSUPPORTED;
+        goto Done;
+      }
+      Status = Handoff->PrepareHandoff (Handoff);
+      if (!EFI_ERROR (Status)) { NativeCount++; }
+    } else if ((ProtocolStatus == EFI_NOT_FOUND) || (ProtocolStatus == EFI_UNSUPPORTED)) {
+      // Generic PCI-backed USB2 HCs have no native provider protocol. Halt
+      // them through the standard contract; native controllers use the
+      // stronger callback, which also irreversibly refuses new submissions.
+      Status = Hc->SetState (Hc, EfiUsbHcStateHalt);
+      if (!EFI_ERROR (Status)) { StandardCount++; }
+    } else {
+      Status = ProtocolStatus;
+    }
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "DARWINBOOT: USB host handoff failed status=%r\n", Status));
+      goto Done;
+    }
+  }
+  Status = EFI_SUCCESS;
+  DEBUG ((DEBUG_WARN, "DARWINBOOT: USB hosts quiesced native=%lu standard=%lu\n",
+    (UINT64)NativeCount, (UINT64)StandardCount));
+
+Done:
+  if (Handles != NULL) {
+    FreeStatus = gBS->FreePool (Handles);
+    if (!EFI_ERROR (Status) && EFI_ERROR (FreeStatus)) { Status = FreeStatus; }
+  }
+  return Status;
 }
 
 // End of the run of EfiConventionalMemory that begins at Start: the UEFI map often lists physically
@@ -684,6 +753,10 @@ Boot (
   FreePool (Tree); Tree = NULL;
   FreePool (TreePath); TreePath = NULL;
   Root->Close (Root); Root = NULL;
+  Stage = "USB host handoff";
+  Status = PrepareUsbHostHandoffs ();
+  if (EFI_ERROR (Status)) { goto Fail; }
+  Print (L"DARWINBOOT: USB host handoff scan complete before final GetMemoryMap\n");
   Stage = "final memory map";
   Status = GetMap (&Map, &Capacity, &MapSize, &Key, &Stride);
   if (EFI_ERROR (Status)) { goto Fail; }

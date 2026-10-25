@@ -4,9 +4,36 @@
 #include <Library/PrintLib.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiLib.h>
+#include <Protocol/Usb2HostController.h>
 #include <Protocol/UniXNULoader.h>
+#include <Protocol/DaliUsbNativeHostHandoff.h>
 #include <Protocol/LoadedImage.h>
 #include "../DarwinBootPkg/Driver/BootVideo.h"
+
+STATIC UINT32 mNativeUsbHandoffCalls;
+STATIC UINT32 mMockUsbSetStateCalls;
+STATIC EFI_STATUS EFIAPI MockNativeUsbHandoff (DALI_USB_NATIVE_HOST_HANDOFF_PROTOCOL *This);
+STATIC EFI_STATUS EFIAPI MockUsbSetState (EFI_USB2_HC_PROTOCOL *This, EFI_USB_HC_STATE State);
+STATIC EFI_USB2_HC_PROTOCOL mMockUsbHc = { .SetState = MockUsbSetState };
+STATIC DALI_USB_NATIVE_HOST_HANDOFF_PROTOCOL mNativeUsbHandoff = {
+  DALI_USB_NATIVE_HOST_HANDOFF_PROTOCOL_REVISION,
+  MockNativeUsbHandoff
+};
+
+STATIC EFI_STATUS EFIAPI MockNativeUsbHandoff (DALI_USB_NATIVE_HOST_HANDOFF_PROTOCOL *This)
+{
+  if ((This != &mNativeUsbHandoff) || (mMockUsbSetStateCalls != 0)) { return EFI_INVALID_PARAMETER; }
+  if (++mNativeUsbHandoffCalls != 1) { return EFI_DEVICE_ERROR; }
+  Print (L"DARWINBOOT-VALIDATION: mock native USB handoff callback PASS\n");
+  return EFI_SUCCESS;
+}
+
+STATIC EFI_STATUS EFIAPI MockUsbSetState (EFI_USB2_HC_PROTOCOL *This, EFI_USB_HC_STATE State)
+{
+  if ((This != &mMockUsbHc) || (State != EfiUsbHcStateHalt)) { return EFI_INVALID_PARAMETER; }
+  mMockUsbSetStateCalls++;
+  return EFI_DEVICE_ERROR; // Native handoff must use the stronger owner callback.
+}
 
 STATIC
 EFI_STATUS
@@ -77,6 +104,12 @@ ValidationEntry (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
                            L"large-memory-window", L"duplicate-memory-window", L"misplaced-memory-window" };
 
   (VOID)SystemTable;
+  mNativeUsbHandoffCalls = 0;
+  mMockUsbSetStateCalls = 0;
+  Status = gBS->InstallMultipleProtocolInterfaces (&ImageHandle,
+    &gEfiUsb2HcProtocolGuid, &mMockUsbHc,
+    &gDaliUsbNativeHostHandoffProtocolGuid, &mNativeUsbHandoff, NULL);
+  if (EFI_ERROR (Status)) { return Status; }
   Status = gBS->HandleProtocol (ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID **)&Loaded);
   if (EFI_ERROR (Status)) { return Status; }
   Status = gBS->LocateProtocol (&gUniXNULoaderProtocolGuid, NULL, (VOID **)&Loader);
