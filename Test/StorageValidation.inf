@@ -1,0 +1,27 @@
+## SPDX-License-Identifier: BSD-2-Clause-Patent
+[Defines]
+  INF_VERSION = 0x00010019
+  BASE_NAME = DarwinBootStorageValidation
+  FILE_GUID = 4F01EA40-0BFB-4327-A72D-039F516741DC
+  MODULE_TYPE = UEFI_DRIVER
+  VERSION_STRING = 0.1
+  ENTRY_POINT = StorageValidationEntry
+
+[Sources]
+  StorageValidation.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  UniXNUPkg/UniXNUPkg.dec
+
+[LibraryClasses]
+  BaseMemoryLib
+  SerialPortLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+
+[Protocols]
+  gUniXNULoaderProtocolGuid ## CONSUMES
+  gEfiLoadedImageProtocolGuid ## CONSUMES
+  gUniXNUStorageQuiesceProtocolGuid ## PRODUCES

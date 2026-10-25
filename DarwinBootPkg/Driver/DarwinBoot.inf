@@ -9,6 +9,8 @@
 
 [Sources]
   DarwinBoot.c
+  StorageHandoff.c
+  StorageHandoff.h
   PackedRamdisk.h
   BootArgs.h
   BootVideo.h
@@ -32,6 +34,7 @@
 
 [Protocols]
   gUniXNULoaderProtocolGuid ## PRODUCES
+  gUniXNUStorageQuiesceProtocolGuid ## SOMETIMES_CONSUMES
   gEfiSimpleFileSystemProtocolGuid ## CONSUMES
   gEfiLoadedImageProtocolGuid ## CONSUMES
   gEfiGraphicsOutputProtocolGuid ## CONSUMES

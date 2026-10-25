@@ -17,6 +17,7 @@
 #include "BootVideo.h"
 #include "PackedRamdisk.h"
 #include "WindowSize.h"
+#include "StorageHandoff.h"
 
 #define WINDOW_SIZE  SIZE_256MB
 #define BLOCK_SIZE   SIZE_2MB
@@ -517,6 +518,7 @@ Boot (
   UINTN                           Stride;
   UINT32                          Version;
   UINTN                           Attempt;
+  UINTN                           StorageProviders;
   CHAR8                           CommandLine[1024];
   UINT64                          Video[6];
   CONST CHAR8                     *Stage;
@@ -683,7 +685,13 @@ Boot (
   FreePool (Image); Image = NULL;
   FreePool (Tree); Tree = NULL;
   FreePool (TreePath); TreePath = NULL;
-  Root->Close (Root); Root = NULL;
+  Stage = "close boot volume";
+  Status = Root->Close (Root); Root = NULL;
+  if (EFI_ERROR (Status)) { goto Fail; }
+  Stage = "storage quiesce";
+  Status = DarwinQuiesceStorage (&StorageProviders);
+  DEBUG ((DEBUG_WARN, "DARWINBOOT: storage quiesce providers=%lu status=%r\n", (UINT64)StorageProviders, Status));
+  if (EFI_ERROR (Status)) { goto Fail; }
   Stage = "final memory map";
   Status = GetMap (&Map, &Capacity, &MapSize, &Key, &Stride);
   if (EFI_ERROR (Status)) { goto Fail; }
@@ -715,6 +723,8 @@ Boot (
   DEBUG ((DEBUG_ERROR, "ID_AA64PFR0_EL1  0x%lx\n", READ_SYSREG (id_aa64pfr0_el1)));
   DEBUG ((DEBUG_ERROR, "\nExiting boot services. A green bar across the top\nmarks the loader trampoline, before kernel entry.\n"));
   for (Attempt = 0; Attempt < 3; Attempt++) {
+    // Storage remains sealed. EBS retries only refresh the map; they must not
+    // reopen volumes, submit storage commands or reuse firmware DMA mappings.
     MapSize = Capacity;
     Status = gBS->GetMemoryMap (&MapSize, Map, &Key, &Stride, &Version);
     if (EFI_ERROR (Status)) {
