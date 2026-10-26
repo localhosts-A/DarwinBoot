@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate freely redistributable Mach-O/ADT fixtures; no Apple binaries."""
 import argparse
+import hashlib
 from pathlib import Path
 import shutil
 import struct
@@ -23,7 +24,7 @@ def main():
     subprocess.run([tools['clang'], '--target=aarch64-none-elf', '-c',
                     f'-DFIXTURE_WINDOW_SIZE={args.memory_size or 0x10000000}',
                     f'-DFIXTURE_GOP={int(args.gop)}',
-                    f'-DFIXTURE_ADT_EXTRA={44 if args.memory_size else 0}',
+                    f'-DFIXTURE_ADT_EXTRA={136 + (44 if args.memory_size else 0)}',
                     str(Path(__file__).with_name('Kernel.S')), '-o', str(output / 'kernel.o')], check=True)
     subprocess.run([tools['ld.lld'], f'-Ttext={BASE + 0x1000:#x}', '-e', '_start',
                     str(output / 'kernel.o'), '-o', str(output / 'kernel.elf')], check=True)
@@ -46,6 +47,9 @@ def main():
     image[:32] = struct.pack('<8I', 0xfeedfacf, 0x100000c, 0, 2, 3, len(commands), 0, 0)
     image[32:32 + len(commands)] = commands
     image[0x1000:0x1000 + len(code)] = code
+    # Deliberately outside every loaded segment, and an unaligned file length.
+    # The post-EBS fixture must see the hash of these bytes too.
+    image += b'UNLOADED-KERNEL-FILE-TRAILER\0' + bytes(range(256)) * 2
     tree = struct.pack('<II32sI12s', 1, 0, b'name', 12, b'device-tree\0')
     def node(name, properties=(), children=()):
         props = [('name', name.encode() + b'\0'), *properties]
@@ -64,7 +68,9 @@ def main():
 
     empty_tree = tree
     tree = node('device-tree', children=[node('chosen',
-        [('darwinboot-memory-size', struct.pack('<Q', args.memory_size))] if args.memory_size else [], children=[
+        ([('darwinboot-memory-size', struct.pack('<Q', args.memory_size))] if args.memory_size else []) +
+        [('darwinboot-kernel-sha256', bytes(32)),
+         ('fixture-kernel-sha256', hashlib.sha256(image).digest())], children=[
         node('memory-map', [('RAMDisk', bytes(16)), ('TrustCache', bytes(16))])])])
     extra_trees = {'missing-ramdisk-adt': empty_tree,
                    'stale-ramdisk-adt': ramdisk_tree(struct.pack('<QQ', 0x1000, 0x1000)),
@@ -87,6 +93,16 @@ def main():
             'misplaced-memory-window': [('darwinboot-memory-size', struct.pack('<Q', 0x20000000))]}.items():
         extra_trees[name] = (node('device-tree', properties, [node('chosen')]) if name == 'misplaced-memory-window'
                              else node('device-tree', children=[node('chosen', properties)]))
+    measurement = [('darwinboot-kernel-sha256', bytes(32))]
+    extra_trees.update({
+        'prefilled-kernel-hash': node('device-tree', children=[node('chosen', [('darwinboot-kernel-sha256', b'\x01' + bytes(31))])]),
+        'short-kernel-hash': node('device-tree', children=[node('chosen', [('darwinboot-kernel-sha256', bytes(31))])]),
+        'long-kernel-hash': node('device-tree', children=[node('chosen', [('darwinboot-kernel-sha256', bytes(33))])]),
+        'duplicate-kernel-hash': node('device-tree', children=[node('chosen', measurement * 2)]),
+        'misplaced-kernel-hash': node('device-tree', measurement, [node('chosen')]),
+        'nested-kernel-hash': node('device-tree', children=[node('chosen', children=[node('memory-map', measurement)])]),
+        'duplicate-chosen-hash': node('device-tree', children=[node('chosen', measurement)] * 2),
+    })
     module = struct.pack('<I16sI', 2, bytes(range(16)), 1) + bytes([0x11]) * 20 + bytes([2, 0, 0, 0])
     trustcache = struct.pack('<2I', 1, 8) + module
     trust_variants = {name: trustcache for name in ('kernel', 'orphan-trustcache', 'stale-trustcache',

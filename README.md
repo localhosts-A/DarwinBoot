@@ -25,3 +25,21 @@ a timeout, then seals a test provider and forces one EBS retry before the real
 firmware exit and synthetic Mach-O entry. Dali's DSC and DXE FDF list include
 only `DarwinBootPkg/Driver/DarwinBoot.inf`; the fixture is not included there.
 See UniXNU's `docs/storage-handoff.md` for commands and the qualification boundary.
+
+An optional `/chosen/darwinboot-kernel-sha256` property is a measurement slot,
+not a host-provided digest. The complete ADT validator requires a unique
+32-byte all-zero value directly under `/chosen`; prefilled, duplicate,
+misplaced and malformed values refuse boot. Before allocation or relocation,
+DarwinBoot hashes the complete original kernel file (including bytes outside
+loaded segments) and fills the slot. The owned handoff ADT receives that value.
+Missing slots preserve legacy RAM boots; consumers that require a measurement
+must reject absence. SHA-256 is linked directly from `KernelMeasurement.c`,
+adapted from UniXNU's MIT NativeAdreno SHA implementation, without a selectable
+Null library. This is a loader observation, not a signature or source-build
+attestation. A platform authorizing writes must also bind its actual loader
+binary and source pins, and independently validate device/layout/range policy.
+
+The synthetic QEMU kernel compares the post-EBS slot with an independent test
+digest in its ADT. Its original file includes an unaligned trailer outside all
+loaded segments. Validation covers seven bad measurement slots in addition to
+the existing 33 rejected requests; the storage fixture also forces an EBS retry.

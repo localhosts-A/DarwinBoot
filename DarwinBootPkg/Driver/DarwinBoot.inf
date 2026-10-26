@@ -11,6 +11,8 @@
   DarwinBoot.c
   StorageHandoff.c
   StorageHandoff.h
+  KernelMeasurement.c
+  KernelMeasurement.h
   PackedRamdisk.h
   BootArgs.h
   BootVideo.h

@@ -18,6 +18,7 @@
 #include "PackedRamdisk.h"
 #include "WindowSize.h"
 #include "StorageHandoff.h"
+#include "KernelMeasurement.h"
 
 #define WINDOW_SIZE  SIZE_256MB
 #define BLOCK_SIZE   SIZE_2MB
@@ -197,7 +198,7 @@ ParseKernel (CONST UINT8 *Data, UINTN Size, KERNEL *Kernel)
 
 STATIC
 BOOLEAN
-AdtNode (CONST UINT8 *Data, UINTN Size, UINTN *Offset, UINTN Depth, UINTN ParentPath, UINTN *RamdiskOffset, UINTN *TrustCacheOffset, UINTN *AddonOffset, UINT64 *WindowSize, BOOLEAN *KeepPacked)
+AdtNode (CONST UINT8 *Data, UINTN Size, UINTN *Offset, UINTN Depth, UINTN ParentPath, UINTN *RamdiskOffset, UINTN *TrustCacheOffset, UINTN *AddonOffset, UINT64 *WindowSize, BOOLEAN *KeepPacked, UINTN *KernelHashOffset)
 {
   UINT32 Properties;
   UINT32 Children;
@@ -208,6 +209,8 @@ AdtNode (CONST UINT8 *Data, UINTN Size, UINTN *Offset, UINTN Depth, UINTN Parent
   UINTN  TrustCandidate;
   UINTN  AddonCandidate;
   UINTN  MemoryCandidate;
+  UINTN  HashCandidate;
+  UINTN  Byte;
   CONST UINT8 *Name;
   UINTN  NameLength;
 
@@ -217,7 +220,8 @@ AdtNode (CONST UINT8 *Data, UINTN Size, UINTN *Offset, UINTN Depth, UINTN Parent
   TrustCandidate = MAX_UINTN;
   AddonCandidate = MAX_UINTN;
   MemoryCandidate = MAX_UINTN;
-  if ((Depth > 64) || (Size - *Offset < 8)) { return FALSE; }
+  HashCandidate = MAX_UINTN;
+  if ((Depth > 64) || (*Offset > Size) || (Size - *Offset < 8)) { return FALSE; }
   Properties = U32 (Data + *Offset);
   Children = U32 (Data + *Offset + 4);
   *Offset += 8;
@@ -254,6 +258,11 @@ AdtNode (CONST UINT8 *Data, UINTN Size, UINTN *Offset, UINTN Depth, UINTN Parent
       if ((MemoryCandidate != MAX_UINTN) || (Length != 8)) { return FALSE; }
       MemoryCandidate = *Offset;
     }
+    if (AsciiStrCmp ((CONST CHAR8 *)(Data + *Offset - 36), DARWIN_KERNEL_SHA256_PROPERTY) == 0) {
+      if ((HashCandidate != MAX_UINTN) || (Length != DARWIN_KERNEL_SHA256_BYTES)) { return FALSE; }
+      for (Byte = 0; Byte < Length; Byte++) { if (Data[*Offset + Byte] != 0) { return FALSE; } }
+      HashCandidate = *Offset;
+    }
     *Offset += Length;
     if (ALIGN_VALUE (*Offset, 4) > Size) { return FALSE; }
     *Offset = ALIGN_VALUE (*Offset, 4);
@@ -279,9 +288,13 @@ AdtNode (CONST UINT8 *Data, UINTN Size, UINTN *Offset, UINTN Depth, UINTN Parent
     *WindowSize = U64 (Data + MemoryCandidate);
     if (!DarwinWindowSizeValid (*WindowSize)) { return FALSE; }
   }
+  if (HashCandidate != MAX_UINTN) {
+    if ((Path != 1) || (*KernelHashOffset != MAX_UINTN)) { return FALSE; }
+    *KernelHashOffset = HashCandidate;
+  }
   if (Children > (Size - *Offset) / 8) { return FALSE; }
   for (Index = 0; Index < Children; Index++) {
-    if (!AdtNode (Data, Size, Offset, Depth + 1, Path, RamdiskOffset, TrustCacheOffset, AddonOffset, WindowSize, KeepPacked)) { return FALSE; }
+    if (!AdtNode (Data, Size, Offset, Depth + 1, Path, RamdiskOffset, TrustCacheOffset, AddonOffset, WindowSize, KeepPacked, KernelHashOffset)) { return FALSE; }
   }
   return TRUE;
 }
@@ -519,6 +532,7 @@ Boot (
   UINT32                          Version;
   UINTN                           Attempt;
   UINTN                           StorageProviders;
+  UINTN                           KernelHashOffset;
   CHAR8                           CommandLine[1024];
   UINT64                          Video[6];
   CONST CHAR8                     *Stage;
@@ -581,8 +595,15 @@ Boot (
   AddonOffset = MAX_UINTN;
   WindowSize = 0;
   KeepPacked = FALSE;
+  KernelHashOffset = MAX_UINTN;
   Stage = "validate Apple DT";
-  if (!AdtNode (Tree, TreeSize, &Offset, 0, 3, &RamdiskOffset, &TrustCacheOffset, &AddonOffset, &WindowSize, &KeepPacked) || (Offset != TreeSize)) { Status = EFI_COMPROMISED_DATA; goto Fail; }
+  if (!AdtNode (Tree, TreeSize, &Offset, 0, 3, &RamdiskOffset, &TrustCacheOffset, &AddonOffset, &WindowSize, &KeepPacked, &KernelHashOffset) || (Offset != TreeSize)) { Status = EFI_COMPROMISED_DATA; goto Fail; }
+  Stage = "measure original kernel";
+  Status = DarwinMeasureKernel (Tree, TreeSize, KernelHashOffset, Image, ImageSize);
+  if (Status != EFI_SUCCESS) { goto Fail; }
+  if (KernelHashOffset != MAX_UINTN) {
+    DEBUG ((DEBUG_WARN, "DARWINBOOT: kernel SHA-256 measured bytes=%lu\n", (UINT64)ImageSize));
+  }
   if (KeepPacked && (!RamdiskPacked || (RamdiskOffset == MAX_UINTN))) { Status = EFI_COMPROMISED_DATA; goto Fail; }
   if (WindowSize == 0) { WindowSize = WINDOW_SIZE; }
   if (Kernel.Base > MAX_UINT64 - WindowSize) { Status = EFI_LOAD_ERROR; goto Fail; }

@@ -78,6 +78,21 @@ _start:
   ldr w7, [x6, #40]
   cmp w7, #12
   b.ne failed
+  // Compare loader's measured whole-file hash to an independent fixture value.
+  // The expected digest lives only in the test ADT, outside the hashed file.
+  add x14, x6, #144 + FIXTURE_ADT_EXTRA - 136
+  add x15, x6, #212 + FIXTURE_ADT_EXTRA - 136
+  mov x10, #32
+  mov w11, #0
+5:
+  ldrb w12, [x14], #1
+  ldrb w13, [x15], #1
+  cmp w12, w13
+  b.ne failed
+  orr w11, w11, w12
+  subs x10, x10, #1
+  b.ne 5b
+  cbz w11, failed
   // Actual owned RAMDisk address/rounded size patched into the nested ADT.
   add x14, x6, #200 + FIXTURE_ADT_EXTRA
   ldp w9, w15, [x14]
@@ -179,6 +194,7 @@ done:
 command_line:
   .asciz "darwinboot.fixture=1"
 passed:
+  .ascii "DARWINBOOT-FIXTURE: loader whole-file kernel measurement PASS\n"
 #if FIXTURE_GOP
   .asciz "DARWINBOOT-FIXTURE: actual GOP boot video after ExitBootServices PASS\n"
 #else

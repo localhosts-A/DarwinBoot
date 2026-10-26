@@ -75,6 +75,9 @@ ValidationEntry (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
   CHAR16 *MemoryPaths[] = { L"bad-memory-size", L"small-memory-window", L"unaligned-memory-window",
                            L"large-memory-window", L"duplicate-memory-window", L"misplaced-memory-window" };
+  CHAR16 *MeasurementPaths[] = { L"prefilled-kernel-hash", L"short-kernel-hash", L"long-kernel-hash",
+                                L"duplicate-kernel-hash", L"misplaced-kernel-hash", L"nested-kernel-hash",
+                                L"duplicate-chosen-hash" };
 
   (VOID)SystemTable;
   Status = gBS->HandleProtocol (ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID **)&Loaded);
@@ -132,7 +135,12 @@ ValidationEntry (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
       goto Failed;
     }
   }
-  Print (L"DARWINBOOT-VALIDATION: 33 rejected requests; firmware retained PASS\n");
+  for (Index = 0; Index < ARRAY_SIZE (MeasurementPaths); Index++) {
+    UnicodeSPrint (Path, sizeof (Path), L"\\EFI\\UniXNU\\Payloads\\%s.macho", MeasurementPaths[Index]);
+    Request.KernelPath = Path;
+    if (Loader->Boot (Loader, &Request) != EFI_COMPROMISED_DATA) { goto Failed; }
+  }
+  Print (L"DARWINBOOT-VALIDATION: 40 rejected requests; firmware retained PASS\n");
   if (EFI_ERROR (ValidateVideo ())) { goto Failed; }
   return EFI_SUCCESS;
 Failed:
